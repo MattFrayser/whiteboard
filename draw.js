@@ -15,8 +15,8 @@ let offsetX = 0, offsetY = 0;
 let scale = 1;
 
 let currTool = 'draw'
-let lineColor = '#000000'
-let lineWidth = 5; 
+let currBrushColor = '#000000'
+let currBrushWidth = 5; 
 
 function worldToViewport(point) {
     return {
@@ -130,7 +130,8 @@ window.addEventListener("resize", requestRedraw);
 canvas.addEventListener('mousedown', onMouseDown);
 canvas.addEventListener('mousemove', onMouseMove);
 canvas.addEventListener('mouseup', onMouseUp);
-;
+canvas.addEventListener('wheel', onMouseWheel);
+
 function onMouseDown(event) {
    
 
@@ -144,8 +145,8 @@ function onMouseDown(event) {
         const worldPos = viewportToWorld({x: mouseX, y: mouseY});
         currStroke = {
             points: [worldPos],
-            color: lineColor,
-            width: lineWidth,
+            color: currBrushColor,
+            width: currBrushWidth,
             isEraser: currTool === 'erase'
         };
 
@@ -188,10 +189,14 @@ function onMouseUp() {
     if (leftMouseDown && currStroke) {
         drawings.push(currStroke);
         currStroke = null;
+
+        undoneDrawings.length = 0
+        updateUndoRedoButtons()
     }
 
     leftMouseDown = false;
     rightMouseDown = false;
+
     updateCursor()
 }
 
@@ -218,101 +223,162 @@ function onMouseWheel(event) {
 // =======================
 
 const colorSwatches = document.querySelectorAll('.swatch');
-        const colorMenu = document.getElementById('colorMenu');
-        const colorPicker = document.getElementById('colorPicker');
-        const colorGrid = document.getElementById('colorGrid');
+const colorMenu = document.getElementById('colorMenu');
+const colorPicker = document.getElementById('colorPicker');
+const colorGrid = document.getElementById('colorGrid');
+const brushSize = document.getElementById('brushSize');
+const undoBtn = document.getElementById('undoBtn');
+const redoBtn = document.getElementById('redoBtn');
 
-        let activeSwatchForMenu = null;
-        let activeSwatch = colorSwatches[0];
-        const clickTimers = new Map();
+let activeSwatchForMenu = null;
+let activeSwatch = colorSwatches[0];
+const clickTimers = new Map();
 
-        const colors = [
-            '#000000', '#FFFFFF', '#FF0000', '#00FF00', '#0000FF', '#FFFF00',
-            '#FF00FF', '#00FFFF', '#800000', '#008000', '#000080', '#808000',
-            '#800080', '#008080', '#C0C0C0', '#808080', '#FFA500', '#A52A2A',
-            '#FFC0CB', '#FFD700', '#4B0082', '#9370DB', '#90EE90', '#FF6347'
-        ];
+const colors = [
+    '#000000', '#FFFFFF', '#FF0000', '#00FF00', '#0000FF', '#FFFF00',
+    '#FF00FF', '#00FFFF', '#800000', '#008000', '#000080', '#808000',
+    '#800080', '#008080', '#C0C0C0', '#808080', '#FFA500', '#A52A2A',
+    '#FFC0CB', '#FFD700', '#4B0082', '#9370DB', '#90EE90', '#FF6347'
+];
 
-        colors.forEach(color => {
-            const option = document.createElement('div');
-            option.className = 'color-option';
-            option.style.background = color;
-            option.dataset.color = color;
-            colorGrid.appendChild(option);
-        });
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('.color-picker-container')) {
+        closeMenu();
+    }
+});
 
-        colorGrid.addEventListener('click', (e) => {
-            if (e.target.classList.contains('color-option')) {
-                selectColor(e.target.dataset.color);
-                closeMenu();
-            }
-        });
+colors.forEach(color => {
+    const option = document.createElement('div');
+    option.className = 'color-option';
+    option.style.background = color;
+    option.dataset.color = color;
+    colorGrid.appendChild(option);
+});
 
-        colorSwatches.forEach(swatch => {
-            swatch.addEventListener('click', (e) => {
-                const color = e.target.dataset.color;
-                
-                if (clickTimers.has(swatch)) {
-                    clearTimeout(clickTimers.get(swatch));
-                    clickTimers.delete(swatch);
-                    openMenu(swatch);
-                } else {
-                    const timer = setTimeout(() => {
-                        selectColor(color);
-                        clickTimers.delete(swatch);
-                    }, 250);
-                    clickTimers.set(swatch, timer);
-                }
-            });
-        });
+colorGrid.addEventListener('click', (e) => {
+    if (e.target.classList.contains('color-option')) {
+        selectColor(e.target.dataset.color);
+        closeMenu();
+    }
+});
 
-        colorPicker.addEventListener('input', (e) => selectColor(e.target.value));
+colorPicker.addEventListener('input', (e) => selectColor(e.target.value));
 
-        function selectColor(color) {
-            lineColor = color;
-            
-            if (activeSwatch) {
-                activeSwatch.classList.remove('active');
-            }
-            
-            let matchingSwatch = null;
-            for (const swatch of colorSwatches) {
-                if (swatch.dataset.color.toUpperCase() === color.toUpperCase()) {
-                    matchingSwatch = swatch;
-                    break;
-                }
-            }
-            
-            if (matchingSwatch) {
-                activeSwatch = matchingSwatch;
-            } else if (activeSwatchForMenu) {
-                activeSwatchForMenu.style.background = color;
-                activeSwatchForMenu.dataset.color = color;
-                activeSwatch = activeSwatchForMenu;
-            }
-            
-            if (activeSwatch) {
-                activeSwatch.classList.add('active');
-            }
+
+colorMenu.addEventListener('click', (e) => {
+    e.stopPropagation();
+});
+
+colorSwatches.forEach(swatch => {
+    swatch.addEventListener('click', (e) => {
+        const color = swatch.dataset.color;
+        const size = parseInt(swatch.dataset.size) || 5;
+        
+        if (clickTimers.has(swatch)) {
+            clearTimeout(clickTimers.get(swatch));
+            clickTimers.delete(swatch);
+            openMenu(swatch);
+        } else {
+            const timer = setTimeout(() => {
+                selectColor(color);
+                selectBrushSize(size);
+                clickTimers.delete(swatch);
+            }, 250);
+            clickTimers.set(swatch, timer);
         }
+    });
+});
 
-        function openMenu(swatch) {
-            activeSwatchForMenu = swatch;
-            colorMenu.classList.remove('hidden');
-            colorPicker.value = lineColor;
+function selectColor(color) {
+    currBrushColor = color;
+    
+    if (activeSwatch) {
+        activeSwatch.classList.remove('active');
+    }
+    
+    let matchingSwatch = null;
+    for (const swatch of colorSwatches) {
+        if (swatch.dataset.color.toUpperCase() === color.toUpperCase()) {
+            matchingSwatch = swatch;
+            break;
         }
-
-        function closeMenu() {
-            colorMenu.classList.add('hidden');
-            activeSwatchForMenu = null;
+    }
+    
+    if (matchingSwatch) {
+        activeSwatch = matchingSwatch;
+    } else if (activeSwatchForMenu) {
+        const circle = activeSwatchForMenu.querySelector('.swatch-circle');
+        if (circle) {
+            circle.style.background = color;
         }
+        activeSwatchForMenu.dataset.color = color;
+        activeSwatch = activeSwatchForMenu;
+    }
+    
+    if (activeSwatch) {
+        activeSwatch.classList.add('active');
+        updateBrushPreview();   
+    }
+}
 
-        document.addEventListener('click', (e) => {
-            if (!e.target.closest('.color-picker-container')) {
-                closeMenu();
-            }
-        });
+function openMenu(swatch) {
+    activeSwatchForMenu = swatch;
+    colorMenu.classList.remove('hidden');
+    colorPicker.value = currBrushColor;
+    const swatchSize = parseInt(swatch.dataset.size) || currBrushWidth;
+    selectBrushSize(swatchSize);
+}
 
-        colorMenu.addEventListener('click', (e) => {
-            e.stopPropagation();
-        });
+function closeMenu() {
+    colorMenu.classList.add('hidden');
+    activeSwatchForMenu = null;
+}
+
+brushSize.addEventListener('input', (e) => {
+    selectBrushSize(parseInt(e.target.value));
+});
+
+function selectBrushSize(size) {
+    currBrushWidth = size;
+    brushSize.value = currBrushWidth;
+    
+    if (activeSwatch) {
+        activeSwatch.dataset.size = currBrushWidth;
+    }
+    
+    updateBrushPreview();
+}
+
+function updateBrushPreview() {
+    if (activeSwatch) {
+        const circle = activeSwatch.querySelector('.swatch-circle');
+        if (circle) {
+            const size = Math.min(36, Math.max(8, currBrushWidth * 1.5));
+            circle.style.width = size + 'px';
+            circle.style.height = size + 'px';
+        }
+    }
+}
+
+undoBtn.addEventListener('click', () => {
+    if (drawings.length > 0) {
+        const lastStroke = drawings.pop()
+        undoneDrawings.push(lastStroke)
+        updateUndoRedoButtons()
+        requestRedraw()
+    }
+});
+
+redoBtn.addEventListener('click', () => {
+    if (undoneDrawings.length > 0) {
+        const stroke = undoneDrawings.pop()
+        drawings.push(stroke)
+        updateUndoRedoButtons()
+        requestRedraw(stroke)
+    }
+});
+
+function updateUndoRedoButtons() {
+    undoBtn.disabled = drawings.length === 0
+    redoBtn.disabled = undoneDrawings.length === 0
+}

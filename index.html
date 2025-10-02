@@ -10,18 +10,32 @@
         <div class = "toolbar"> 
             <div class="color-picker-container">
                 <div class="color-swatches">
-                    <button class="swatch active" data-color="#000000" style="background: #000000;"></button>
-                    <button class="swatch" data-color="#FF0000" style="background: #FF0000;"></button>
-                    <button class="swatch" data-color="#0000FF" style="background: #0000FF;"></button>
+                    <button class="swatch active" data-color="#000000" data-size="5">
+                        <div class="swatch-circle" style="background: #000000; width: 12px; height: 12px;"></div>
+                    </button>
+                    <button class="swatch" data-color="#FF0000" data-size="15">
+                        <div class="swatch-circle" style="background: #FF0000; width: 22px; height: 22px;"></div>
+                    </button>
+                    <button class="swatch" data-color="#0000FF" data-size="25">
+                        <div class="swatch-circle" style="background: #0000FF; width: 32px; height: 32px;"></div>
+                    </button>
                 </div>
                 
                 <div id="colorMenu" class="color-menu hidden">
+                    <div class="brush-size-control">
+                        <input type="range" id="brushSize" min="1" max="30" value="5">
+                        <label>Thickness</label>
+                    </div>
                     <input type="color" id="colorPicker" value="#000000">
                     <div class="color-grid" id="colorGrid"></div>
                 </div>
             </div>        
+            <div class="control-group">
+                <button id="undoBtn" disabled> &#x27F2 </button>
+                <button id="redoBtn" disabled> &#x27F3 </button>
+            </div>
         </div>
-        <canvas id="canvas"><Your browser does not support HTML5 canvas/canvas>
+        <canvas id="canvas">Your browser does not support HTML5 canvas</canvas>
         <script src="draw.js"></script>
   </body>
 </html> 
