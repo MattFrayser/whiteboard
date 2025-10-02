@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Whiteboard</title>
+    <link rel="stylesheet" href="styles.css"></link>
+  </head>
+  <body>
+        <div class = "toolbar"> 
+            <div class="color-picker-container">
+                <div class="color-swatches">
+                    <button class="swatch active" data-color="#000000" style="background: #000000;"></button>
+                    <button class="swatch" data-color="#FF0000" style="background: #FF0000;"></button>
+                    <button class="swatch" data-color="#0000FF" style="background: #0000FF;"></button>
+                </div>
+                
+                <div id="colorMenu" class="color-menu hidden">
+                    <input type="color" id="colorPicker" value="#000000">
+                    <div class="color-grid" id="colorGrid"></div>
+                </div>
+            </div>        
+        </div>
+        <canvas id="canvas"><Your browser does not support HTML5 canvas/canvas>
+        <script src="draw.js"></script>
+  </body>
+</html> 
