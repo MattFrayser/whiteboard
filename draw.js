@@ -18,6 +18,9 @@ let currTool = 'draw'
 let currBrushColor = '#000000'
 let currBrushWidth = 5; 
 
+// =======================
+// COORDINATES 
+// =======================
 function worldToViewport(point) {
     return {
         x: (point.x + offsetX) * scale, 
@@ -36,18 +39,10 @@ function visibleWorldSize() {
         height: canvas.clientHeight / scale
     };
 }
-function updateCursor() {
-    if (rightMouseDown) {
-        canvas.style.cursor = 'grabbing';
-    } else {
-        canvas.style.cursor = 'crosshair';
-    }
-}
 
 // =======================
 // Drawing
 // =======================
-
 // throttle redraws
 function requestRedraw() {
     if (!redrawQueued) {
@@ -120,9 +115,6 @@ function drawStroke(stroke) {
     context.globalCompositeOperation = 'source-over';
 }
 
-redrawCanvas();
-updateCursor();
-window.addEventListener("resize", requestRedraw);
 
 // =======================
 // Mouse Movement
@@ -133,7 +125,6 @@ canvas.addEventListener('mouseup', onMouseUp);
 canvas.addEventListener('wheel', onMouseWheel);
 
 function onMouseDown(event) {
-   
 
     if (event.button === 0) {
         leftMouseDown = true;
@@ -216,6 +207,14 @@ function onMouseWheel(event) {
     offsetY -= unitsZoomedY * distY;
 
     requestRedraw();
+}
+
+function updateCursor() {
+    if (rightMouseDown) {
+        canvas.style.cursor = 'grabbing';
+    } else {
+        canvas.style.cursor = 'crosshair';
+    }
 }
 
 // =======================
@@ -402,3 +401,25 @@ document.addEventListener('keydown', (e) => {
         redo();
     }
 });
+// =======================
+// ROOMS 
+// =======================
+function generateRoomCode() {
+    return Math.random().toString(36).substring(2, 8).toUpperCase()
+}
+
+const urlParams = new URLSearchParams(window.location.search);
+let roomCode = urlParams.get('room');
+
+if (!roomCode) {
+    roomCode = generateRoomCode();
+    window.history.replaceState({}, '', `?room=${roomCode}`);
+}
+
+
+// =======================
+// init 
+// =======================
+redrawCanvas();
+updateCursor();
+window.addEventListener("resize", requestRedraw);
