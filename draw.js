@@ -360,25 +360,45 @@ function updateBrushPreview() {
     }
 }
 
-undoBtn.addEventListener('click', () => {
+undoBtn.addEventListener('click', undo)
+redoBtn.addEventListener('click', redo)
+
+function undo() {
     if (drawings.length > 0) {
         const lastStroke = drawings.pop()
         undoneDrawings.push(lastStroke)
         updateUndoRedoButtons()
         requestRedraw()
     }
-});
+}
 
-redoBtn.addEventListener('click', () => {
+function redo() {
     if (undoneDrawings.length > 0) {
         const stroke = undoneDrawings.pop()
         drawings.push(stroke)
         updateUndoRedoButtons()
         requestRedraw(stroke)
     }
-});
-
+}
 function updateUndoRedoButtons() {
     undoBtn.disabled = drawings.length === 0
     redoBtn.disabled = undoneDrawings.length === 0
 }
+
+// =======================
+// Keybinds 
+// =======================
+
+document.addEventListener('keydown', (e) => {
+    // Ctrl+Z (Windows/Linux) or Cmd+Z (Mac)
+    if ((e.crtlKey || e.metaKey) && e.key === 'z' && !e.shiftkey) {
+        e.preventDefault()
+        undo()
+    }
+
+    // Ctrl+Y (Windows/Linux) or Cmd+Shift+Z (Mac)
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        redo();
+    }
+});
