@@ -71,6 +71,7 @@ function redrawCanvas() {
 }
 
 function drawStroke(stroke) {
+    console.log(stroke)
     if (stroke.points.length < 2) return;
 
     if (stroke.points.length === 1) {
