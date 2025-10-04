@@ -71,7 +71,7 @@ function redrawCanvas() {
 }
 
 function drawStroke(stroke) {
-    console.log(stroke)
+
     if (stroke.points.length < 2) return;
 
     if (stroke.points.length === 1) {
@@ -165,6 +165,7 @@ function onMouseMove(event) {
     if (leftMouseDown && currStroke) {
         const worldPos = viewportToWorld({x: mouseX, y: mouseY});
         currStroke.points.push(worldPos);
+
         requestRedraw();
     }
 
@@ -416,6 +417,28 @@ if (!roomCode) {
     roomCode = generateRoomCode();
     window.history.replaceState({}, '', `?room=${roomCode}`);
 }
+
+let socket = new WebSocket(`ws://localhost:8080/ws?room=${roomCode}`)
+
+socket.onopen = () => {
+    console.log("websocket con success")
+}
+
+socket.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+
+    if (data.type === 'draw') {
+        const remoteStroke = {
+            points: data.points,  
+            color: data.color, 
+            width: data.width, 
+            isEraser: data.isEraser // going to change
+    };
+   
+        drawings.push(remoteStroke)
+        requestRedraw()
+    }
+};
 
 
 // =======================
