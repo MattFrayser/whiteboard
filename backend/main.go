@@ -1,5 +1,7 @@
 package main
+
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,18 +12,6 @@ import (
 
 	"github.com/gorilla/websocket"
 )
-
-type User struct {
-	Connection 	*websocket.Conn
-	Color		string 
-	LastCursorTime 	time.Time
-}
-type Room struct {
-	Connections     []*User
-	Drawings	[][]byte
-	LastActive	time.Time
-	mu 		sync.RWMutex
-}
 
 
 var upgrader = websocket.Upgrader{
@@ -34,41 +24,44 @@ var (
 )
 
 func main() {
-	http.Handle("/", http.FileServer(http.Dir("./frontend")))
-	http.HandleFunc("/ws", handler)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	go cleanupRooms()
+	http.Handle("/", http.FileServer(http.Dir("./frontend")))
+	http.HandleFunc("/ws", handleWebSocket)
+
+	go cleanupRooms(ctx)
 
 	log.Println("WebSocket server started on :8080")
 	err := http.ListenAndServe(":8080", nil)
 	if err != nil {
-		fmt.Println("Error starting server:", err)
+		log.Fatalf("Error starting server: ", err)
 	}
 }
 
-// handler: Upgrades to websocket then connection joins room
-func handler(w http.ResponseWriter, r *http.Request) {
-
+// handleWebSocket: Upgrades http to websocket then joins room
+func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Println("Error upgrading connection - ", err)
-		return 
+		fmt.Println("Error upgrading connection - ", err)
+		return
 	}
 	defer conn.Close()
 
-	user := &User{
-		Connection: 	conn,
-		Color:		getRandomHex(),	 
-	}
-	
-	roomCode := r.URL.Query().Get("room")
-	room, err := joinRoom(roomCode, user)	
-	if err != nil {
-		log.Printf("Error: Connection to room (%s) - %v", roomCode, err)
-		return 
+	u := &User{
+		id:         fmt.Sprintf("%d", time.Now().UnixNano()),
+		connection: conn,
+		color:      getRandomHex(),
 	}
 
-	run(conn, room, user)
+	roomCode := r.URL.Query().Get("room")
+	room, err := joinRoom(roomCode, u)
+	if err != nil {
+		fmt.Println("Error: Connection to room (%s) - %v", roomCode, err)
+		return
+	}
+
+	run(conn, room, u)
 }
 
 // joinRoom: Add connection to room based on room code.
@@ -81,42 +74,17 @@ func joinRoom(roomCode string, user *User) (*Room, error) {
 	defer roomsMutex.Unlock()
 
 	if rooms[roomCode] == nil {
-		rooms[roomCode] = &Room{ 
-			Connections: 	[]*User{},
-			Drawings: 	[][]byte{},
-			LastActive: 	time.Now(), 
+		rooms[roomCode] = &Room{
+			connections: []*User{},
+			drawings:    make(map[float64][]byte),
+			lastActive:  time.Now(),
 		}
 	}
 
 	room := rooms[roomCode]
 
-	room.mu.Lock()
-	room.Connections = append(room.Connections, user)
-	room.mu.Unlock()
-
-	return room, nil 
-}
-
-// Leave room: remove user from room connections.
-func leaveRoom(room *Room, user *User) {
-
-	if room == nil {
-		return
-	}
-
-	room.mu.Lock()
-	// slice removal seems messy, but users in room will not be large 
-	for i, v := range room.Connections {
-		if v == user {
-			room.Connections = append(room.Connections[:i], room.Connections[i+1:]...)
-			break
-		}
-	}
-
-	log.Println("User: has left room %v - connections left %d", room, len(room.Connections))
-
-	room.LastActive = time.Now()
-	room.mu.Unlock()
+	room.join(user)
+	return room, nil
 }
 
 // run: Message loop for websocket.
@@ -126,98 +94,159 @@ func run(conn *websocket.Conn, room *Room, user *User) {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
 			log.Println("Error: Reading message", err)
-			leaveRoom(room, user)
+			room.leave(user)
 			break // conn dead
 		}
 
-		var data map[string]interface{}
-		err = json.Unmarshal(msg, &data)
-		if err != nil {
-			log.Println("Error: Converting msg to json -", err)
+	     	if err := handleMessage(room, user, msg); err != nil {	
+			log.Println("error: Converting msg to json -", err)
 			continue // Skip msg
 		}
-
-		log.Println()
-
-		messageType, ok := data["type"].(string)
-		if !ok {
-			continue
-		}
-
-		switch messageType {
-		case "draw":
-
-			room.mu.Lock()
-			room.Drawings = append(room.Drawings, msg)
-			room.LastActive = time.Now()
-			room.mu.Unlock()
-
-			broadcast(room, msg, user.Connection)
-
-
-		case "cursor":
-
-			data["color"] = user.Color
-
-			if time.Since(user.LastCursorTime) < 33*time.Millisecond {
-				continue // Throttle cursor msgs
-			}
-
-			msgWithColor, err := json.Marshal(data)
-			if err != nil {
-				continue
-			}
-
-			broadcast(room, msgWithColor, user.Connection)
-
-		default:
-			log.Println("Unknown msg:", messageType)
-		}
 	}
-
 }
 
-// broadcast: write message to all users in room connection. 
-func broadcast(room *Room, msg[]byte, sender *websocket.Conn) {
+func handleMessage(room *Room, user *User, msg []byte) error {
+	var data map[string]interface{}
+	if err := json.Unmarshal(msg, &data); err != nil {
+		return fmt.Errorf("unmarshal base message: %w", err)
+	}
+
+	messageType, ok := data["type"].(string)
+	if !ok {
+		return fmt.Errorf("missing message type")
+	}
+	switch messageType {
+	case "getUserId":
+		return handleGetUserID(user)
+	case "draw":
+		return handleDraw(room, user, data)
+	case "cursor":
+		return handleCursor(room, user, data)
+	case "undo":
+		return handleUndo(room, user, data, msg)
+	case "redo":
+		return handleRedo(room, user, data, msg)
+	default:
+		return fmt.Errorf("unknown message type: %s", messageType)
+	}
+}
+
+func handleGetUserID(user *User) error {
+	response := map[string]interface{}{
+		"type":    "userId",
+		"userId":  user.id,
+	}
+
+	responseMsg, err := json.Marshal(response)
+	if err != nil {
+		return fmt.Errorf("marshal user ID response: %w", err)
+	}
+
+	return user.connection.WriteMessage(websocket.TextMessage, responseMsg)
+}
+
+func handleDraw(room *Room, user *User, data map[string]interface{}) error {
+	id, ok := data["id"].(float64)
+	if !ok {
+		return fmt.Errorf("missing stroke id")
+	}
+
+	// Add user id to message
+	data["userId"] = user.id
+	msgWithUser, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("marshall draw message: %w", err)
+	}
 
 	room.mu.Lock()
-	defer room.mu.Unlock()
+	room.drawings[id] = msgWithUser
+	room.lastActive = time.Now()
+	room.mu.Unlock()
 
-	for _, user := range room.Connections {
-		// Skip sender to avoid echo
-		if user.Connection == sender {
-			continue
-		}
-			
-		err := user.Connection.WriteMessage(websocket.TextMessage, msg)
-		if err != nil {
-			leaveRoom(room, user)	// dead conn, clean
-		}
+	room.broadcast(msgWithUser, user.connection)
+	return nil
+}
+
+func handleCursor(room *Room, user *User, data map[string]interface{}) error {
+	if time.Since(user.lastCursorTime) < 33*time.Millisecond {
+		return nil // throttle
 	}
+
+	user.lastCursorTime = time.Now()
+	data["color"] = user.color
+
+	msg, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("marshal cursor message: %w", err)
+	}
+
+	room.broadcast(msg, user.connection)
+	return nil
+}
+
+func handleUndo(room *Room, user *User, data map[string]interface{}, msg []byte) error {
+	id, ok := data["id"].(float64)
+	if !ok {
+		return fmt.Errorf("missing stroke id")
+	}
+
+	room.mu.Lock()
+	delete(room.drawings, id)
+	room.lastActive = time.Now()
+	room.mu.Unlock()
+
+	room.broadcast(msg, user.connection)
+	return nil
+}
+
+func handleRedo(room *Room, user *User, data map[string]interface{}, msg []byte) error {
+	id, ok := data["id"].(float64)
+	if !ok {
+		return fmt.Errorf("missing stroke id")
+	}
+
+	data["userId"] = user.id
+	msgWithUser, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("marshal redo message: %w", err)
+	}
+
+	room.mu.Lock()
+	room.drawings[id] = msgWithUser
+	room.lastActive = time.Now()
+	room.mu.Unlock()
+
+	room.broadcast(msgWithUser, user.connection)
+	return nil
 }
 
 // cleanupRooms: Routine to delete expired rooms.
-func cleanupRooms(){
+func cleanupRooms(ctx context.Context){
 	ticker := time.NewTicker(15 * time.Minute)
-	for range ticker.C {
-		roomsMutex.Lock()
-		now := time.Now()
+	defer ticker.Stop()
 
-		for code, room := range rooms {
-			room.mu.RLock()
-			expired := (now.Sub(room.LastActive) > 1*time.Hour) && len(room.Connections) == 0 
-			room.mu.RUnlock()
+	for {
+		select {
+		case <-ctx.Done():
+			return 
+		case <-ticker.C:
+			roomsMutex.Lock()
+			now := time.Now()
 
-			if expired {
-				delete(rooms, code)
-				log.Println("Room %s expired", code)
+			for code, room := range rooms {
+				room.mu.RLock()
+				expired := (now.Sub(room.lastActive) > 1*time.Hour) && len(room.connections) == 0
+				room.mu.RUnlock()
+
+				if expired {
+					delete(rooms, code)
+					log.Printf("Room %s expired", code)
+				}
 			}
+			roomsMutex.Unlock()
 		}
 
-		roomsMutex.Unlock()
-
 	}
-
 }
 
 // temporary

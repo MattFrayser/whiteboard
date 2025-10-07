@@ -6,6 +6,7 @@ document.oncontextmenu = () => false;
 
 const drawings = []
 const undoneDrawings = []
+let myUserId = null
 let currStroke = null
 let redrawQueued = false
 
@@ -17,6 +18,7 @@ let scale = 1;
 let currTool = 'draw'
 let currBrushColor = '#000000'
 let currBrushWidth = 5; 
+let currStrokeId = null;
 
 // =======================
 // COORDINATES 
@@ -72,7 +74,6 @@ function redrawCanvas() {
 
 function drawStroke(stroke) {
 
-    if (stroke.points.length < 2) return;
 
     if (stroke.points.length === 1) {
         const point = worldToViewport(stroke.points[0]);
@@ -82,6 +83,8 @@ function drawStroke(stroke) {
         context.fill();
         return;
     }
+    
+    if (stroke.points.length < 1) return;
 
     context.beginPath();
     context.strokeStyle = stroke.color;
@@ -128,14 +131,17 @@ canvas.addEventListener('wheel', onMouseWheel);
 function onMouseDown(event) {
 
     if (event.button === 0) {
+        currStrokeId = Math.floor(Date.now() + Math.random());
         leftMouseDown = true;
         rightMouseDown = false;
 
-         mouseX = event.pageX;
+        mouseX = event.pageX;
         mouseY = event.pageY;
 
         const worldPos = viewportToWorld({x: mouseX, y: mouseY});
         currStroke = {
+            id: currStrokeId,
+            userId: myUserId,
             points: [worldPos],
             color: currBrushColor,
             width: currBrushWidth,
@@ -165,6 +171,17 @@ function onMouseMove(event) {
     if (leftMouseDown && currStroke) {
         const worldPos = viewportToWorld({x: mouseX, y: mouseY});
         currStroke.points.push(worldPos);
+        
+        console.log(currStrokeId)
+        socket.send(JSON.stringify({
+            type: 'draw',
+            id: currStrokeId,
+            x: worldPos.x,
+            y: worldPos.y,
+            color: currBrushColor,
+            width: currBrushWidth,
+            isEraser: currTool === 'erase'
+        }));
 
         requestRedraw();
     }
@@ -183,7 +200,8 @@ function onMouseUp() {
         drawings.push(currStroke);
         currStroke = null;
 
-        undoneDrawings.length = 0
+        // Only clear redo stack for current user's strokes
+        undoneDrawings = undoneDrawings.filter(s => s.userId !== myUserId)
         updateUndoRedoButtons()
     }
 
@@ -365,11 +383,19 @@ undoBtn.addEventListener('click', undo)
 redoBtn.addEventListener('click', redo)
 
 function undo() {
-    if (drawings.length > 0) {
-        const lastStroke = drawings.pop()
-        undoneDrawings.push(lastStroke)
-        updateUndoRedoButtons()
-        requestRedraw()
+    // Find last stroke by current user
+    for (let i = drawings.length - 1; i >= 0; i--) {
+        if (drawings[i].userId === myUserId) {
+            const stroke = drawings.splice(i, 1)[0]
+            undoneDrawings.push(stroke)
+            socket.send(JSON.stringify({
+                type:'undo',
+                id: stroke.id,
+            }))
+            updateUndoRedoButtons()
+            requestRedraw()
+            return
+        }
     }
 }
 
@@ -377,12 +403,23 @@ function redo() {
     if (undoneDrawings.length > 0) {
         const stroke = undoneDrawings.pop()
         drawings.push(stroke)
+
+        // Send complete stroke data in one message
+        socket.send(JSON.stringify({
+            type: 'redo',
+            id: stroke.id,
+            points: stroke.points,
+            color: stroke.color,
+            width: stroke.width,
+            isEraser: stroke.isEraser,
+        }));
+
         updateUndoRedoButtons()
-        requestRedraw(stroke)
+        requestRedraw()
     }
 }
 function updateUndoRedoButtons() {
-    undoBtn.disabled = drawings.length === 0
+    undoBtn.disabled = !drawings.some(s => s.userId === myUserId)
     redoBtn.disabled = undoneDrawings.length === 0
 }
 
@@ -392,7 +429,7 @@ function updateUndoRedoButtons() {
 
 document.addEventListener('keydown', (e) => {
     // Ctrl+Z (Windows/Linux) or Cmd+Z (Mac)
-    if ((e.crtlKey || e.metaKey) && e.key === 'z' && !e.shiftkey) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
         e.preventDefault()
         undo()
     }
@@ -422,23 +459,66 @@ let socket = new WebSocket(`ws://localhost:8080/ws?room=${roomCode}`)
 
 socket.onopen = () => {
     console.log("websocket con success")
+    // Request userId from server
+    socket.send(JSON.stringify({ type: 'getUserId' }))
 }
 
+const remoteStrokes = new Map()
 socket.onmessage = (event) => {
     const data = JSON.parse(event.data);
 
+    if (data.type === 'userId') {
+        myUserId = data.userId
+    }
+
     if (data.type === 'draw') {
-        const remoteStroke = {
-            points: data.points,  
-            color: data.color, 
-            width: data.width, 
-            isEraser: data.isEraser // going to change
-    };
-   
-        drawings.push(remoteStroke)
+        if (!remoteStrokes.has(data.id)) {
+
+            const stroke = {
+                id: data.id,
+                userId: data.userId,
+                points: [],
+                color: data.color,
+                width: data.width,
+                isEraser: data.isEraser
+        };
+            remoteStrokes.set(data.id, stroke);
+            drawings.push(stroke)
+    }
+        const stroke = remoteStrokes.get(data.id);
+        stroke.points.push({x: data.x, y: data.y});
+
+        requestRedraw();
+    }
+
+    if (data.type === 'undo') {
+        const index = drawings.findIndex(s => s.id === data.id)
+        if (index !== -1) {
+            drawings.splice(index, 1)
+            remoteStrokes.delete(data.id)
+        }
         requestRedraw()
     }
+
+    if (data.type === 'redo') {
+        const stroke = {
+            id: data.id,
+            userId: data.userId,
+            points: data.points,
+            color: data.color,
+            width: data.width,
+            isEraser: data.isEraser
+        };
+        remoteStrokes.set(data.id, stroke);
+        drawings.push(stroke);
+        requestRedraw();
+    }
+
+    if (data.type === 'cursor') {
+        
+    }
 };
+
 
 
 // =======================
