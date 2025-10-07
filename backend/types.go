@@ -14,7 +14,7 @@ type User struct {
 }
 type Room struct {
 	connections     []*User
-	drawings	map[float64][]byte	
+	drawings	map[float64][][]byte
 	lastActive	time.Time
 	mu 		sync.RWMutex
 }
@@ -27,8 +27,10 @@ func (r *Room) join(u *User) {
 	r.connections = append(r.connections, u)
 
 	// send existing drawings
-	for _, drawing := range r.drawings {
-		u.connection.WriteMessage(websocket.TextMessage, drawing)
+	for _, drawingPoints := range r.drawings {
+		for _, point := range drawingPoints {
+			u.connection.WriteMessage(websocket.TextMessage, point)
+		}
 	}
 }
 

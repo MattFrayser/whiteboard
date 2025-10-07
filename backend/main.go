@@ -76,7 +76,7 @@ func joinRoom(roomCode string, user *User) (*Room, error) {
 	if rooms[roomCode] == nil {
 		rooms[roomCode] = &Room{
 			connections: []*User{},
-			drawings:    make(map[float64][]byte),
+			drawings:    make(map[float64][][]byte),
 			lastActive:  time.Now(),
 		}
 	}
@@ -159,7 +159,7 @@ func handleDraw(room *Room, user *User, data map[string]interface{}) error {
 	}
 
 	room.mu.Lock()
-	room.drawings[id] = msgWithUser
+	room.drawings[id] = append(room.drawings[id], msgWithUser)
 	room.lastActive = time.Now()
 	room.mu.Unlock()
 
@@ -212,7 +212,7 @@ func handleRedo(room *Room, user *User, data map[string]interface{}, msg []byte)
 	}
 
 	room.mu.Lock()
-	room.drawings[id] = msgWithUser
+	room.drawings[id] = [][]byte{msgWithUser}
 	room.lastActive = time.Now()
 	room.mu.Unlock()
 
