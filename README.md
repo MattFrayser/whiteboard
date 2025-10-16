@@ -1,4 +1,4 @@
-# Whiteboard WebSocket API Documentation
+# Whiteboard WebSocket API
 
 A real-time collaborative drawing API built with Go and WebSocket. This documentation covers how to integrate the drawing server into your own projects.
 
